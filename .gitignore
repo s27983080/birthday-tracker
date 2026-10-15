@@ -1,1 +1,7 @@
 REQUIREMENTS.md
+.env
+node_modules/
+dist/
+coverage/
+target/
+*.log

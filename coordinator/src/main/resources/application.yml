@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: coordinator
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/birthdays}
+    username: ${SPRING_DATASOURCE_USERNAME:birthday}
+    password: ${SPRING_DATASOURCE_PASSWORD:birthday}
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:birthday}
+    password: ${SPRING_RABBITMQ_PASSWORD:birthday}
+
+birthday-tracker:
+  queues:
+    submissions: ${SUBMISSIONS_QUEUE:birthday.submissions}
+    reminders: ${REMINDERS_QUEUE:birthday.reminders}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
