@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import BirthdaySubmissionForm from './BirthdaySubmissionForm.vue';
+import { createMemoryHistory } from 'vue-router';
+import { createAppRouter } from '../router';
+import SubmitBirthdayView from './SubmitBirthdayView.vue';
+
+function mountView() {
+  return mount(SubmitBirthdayView, { global: { plugins: [createAppRouter(createMemoryHistory())] } });
+}
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -13,7 +19,7 @@ async function fillAndSubmit(wrapper: VueWrapper) {
   await wrapper.get('form').trigger('submit');
 }
 
-describe('BirthdaySubmissionForm', () => {
+describe('SubmitBirthdayView', () => {
   const fetchMock = vi.fn<typeof fetch>();
 
   beforeEach(() => {
@@ -25,8 +31,14 @@ describe('BirthdaySubmissionForm', () => {
     vi.unstubAllGlobals();
   });
 
+  it('links back to the birthday list', () => {
+    const wrapper = mountView();
+
+    expect(wrapper.get('a.back-link').attributes('href')).toBe('/');
+  });
+
   it('offers reminder windows from 1 to 14 days, defaulting to 7', () => {
-    const wrapper = mount(BirthdaySubmissionForm);
+    const wrapper = mountView();
     const options = wrapper.findAll('#reminderWindowDays option').map((o) => Number(o.element.getAttribute('value')));
 
     expect(options).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
@@ -34,7 +46,7 @@ describe('BirthdaySubmissionForm', () => {
   });
 
   it('disables submit until name and birthday are filled in', async () => {
-    const wrapper = mount(BirthdaySubmissionForm);
+    const wrapper = mountView();
     const button = wrapper.get('button');
 
     expect(button.attributes('disabled')).toBeDefined();
@@ -47,7 +59,7 @@ describe('BirthdaySubmissionForm', () => {
 
   it('posts the birthday and shows a confirmation', async () => {
     fetchMock.mockResolvedValue(jsonResponse(202, { id: '0199e3a0-0000-7000-8000-000000000001' }));
-    const wrapper = mount(BirthdaySubmissionForm);
+    const wrapper = mountView();
 
     await fillAndSubmit(wrapper);
     await flushPromises();
@@ -68,7 +80,7 @@ describe('BirthdaySubmissionForm', () => {
   it('disables the button while the request is in flight', async () => {
     let resolve!: (r: Response) => void;
     fetchMock.mockReturnValue(new Promise((r) => (resolve = r)));
-    const wrapper = mount(BirthdaySubmissionForm);
+    const wrapper = mountView();
 
     await fillAndSubmit(wrapper);
 
@@ -88,7 +100,7 @@ describe('BirthdaySubmissionForm', () => {
         details: [{ field: 'birthDate', message: 'must not be in the future' }],
       }),
     );
-    const wrapper = mount(BirthdaySubmissionForm);
+    const wrapper = mountView();
 
     await fillAndSubmit(wrapper);
     await flushPromises();
@@ -101,7 +113,7 @@ describe('BirthdaySubmissionForm', () => {
 
   it('shows a generic error when the request fails', async () => {
     fetchMock.mockResolvedValue(jsonResponse(503, { error: 'ServiceUnavailable', message: 'down' }));
-    const wrapper = mount(BirthdaySubmissionForm);
+    const wrapper = mountView();
 
     await fillAndSubmit(wrapper);
     await flushPromises();

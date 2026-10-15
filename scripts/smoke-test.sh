@@ -75,6 +75,7 @@ if [[ "$status" == "202" && -n "$id" ]]; then
   done
   if [[ "$row" == "Smoke Test|t" ]]; then
     pass "Coordinator stored the birthday with next_reminder_on"
+    check "GET /api/birthdays lists the new birthday" "http://localhost:${FRONTEND_PORT}/api/birthdays" "\"id\":\"${id}\""
   else
     fail "birthday ${id} not stored within 10s (got: '${row}')"
   fi

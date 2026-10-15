@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
 import { ApiError, submitBirthday } from '../api/birthdays';
+import { formatReminderWindow } from '../format';
 
 const NAME_MAX_LENGTH = 200;
 const REMINDER_WINDOW_OPTIONS = Array.from({ length: 14 }, (_, i) => i + 1);
@@ -44,6 +45,8 @@ async function onSubmit() {
 </script>
 
 <template>
+  <RouterLink :to="{ name: 'birthdays' }" class="back-link">← Back to birthdays</RouterLink>
+
   <form class="birthday-form" novalidate @submit.prevent="onSubmit">
     <h2>Add a birthday</h2>
 
@@ -91,7 +94,7 @@ async function onSubmit() {
         aria-describedby="reminderWindowDays-error"
       >
         <option v-for="days in REMINDER_WINDOW_OPTIONS" :key="days" :value="days">
-          {{ days }} {{ days === 1 ? 'day' : 'days' }} before
+          {{ formatReminderWindow(days) }}
         </option>
       </select>
       <p v-if="fieldErrors.reminderWindowDays" id="reminderWindowDays-error" class="field-error">
@@ -109,6 +112,11 @@ async function onSubmit() {
 </template>
 
 <style scoped>
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+
 .birthday-form {
   display: flex;
   flex-direction: column;

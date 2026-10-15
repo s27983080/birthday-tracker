@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
-import { FakePublisher } from './fakes.js';
+import { FakeBirthdayRepository, FakePublisher } from './fakes.js';
 
 const NOW = new Date('2026-10-14T12:00:00Z');
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -14,7 +14,7 @@ describe('POST /birthdays', () => {
 
   beforeEach(() => {
     publisher = new FakePublisher();
-    app = buildApp({ publisher, now: () => NOW });
+    app = buildApp({ publisher, repository: new FakeBirthdayRepository(), now: () => NOW });
   });
 
   afterEach(() => app.close());
@@ -106,5 +106,47 @@ describe('POST /birthdays', () => {
 
     expect(response.statusCode).toBe(503);
     expect(response.json()).toMatchObject({ error: 'ServiceUnavailable' });
+  });
+});
+
+describe('GET /birthdays', () => {
+  let repository: FakeBirthdayRepository;
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    repository = new FakeBirthdayRepository();
+    app = buildApp({ publisher: new FakePublisher(), repository });
+  });
+
+  afterEach(() => app.close());
+
+  const get = () => app.inject({ method: 'GET', url: '/birthdays' });
+
+  it('returns the stored birthdays in repository order', async () => {
+    repository.birthdays = [
+      { id: '0199e3a0-0000-7000-8000-000000000002', name: 'Grace Hopper', birthDate: '1906-12-09', reminderWindowDays: 3 },
+      { id: '0199e3a0-0000-7000-8000-000000000001', name: 'Ada Lovelace', birthDate: '1815-12-10', reminderWindowDays: 7 },
+    ];
+
+    const response = await get();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ birthdays: repository.birthdays });
+  });
+
+  it('returns an empty list when there are no birthdays', async () => {
+    const response = await get();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ birthdays: [] });
+  });
+
+  it('returns 500 when the database query fails', async () => {
+    repository.failWith = new Error('connection refused');
+
+    const response = await get();
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: 'InternalServerError', message: 'Something went wrong' });
   });
 });

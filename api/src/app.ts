@@ -1,14 +1,16 @@
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import type { BirthdayRepository } from './db.js';
 import { registerErrorHandler } from './errors.js';
 import type { SubmissionPublisher } from './queue.js';
 import { birthdayRoutes } from './routes/birthdays.js';
 
 export interface AppOptions extends FastifyServerOptions {
   publisher: SubmissionPublisher;
+  repository: BirthdayRepository;
   now?: () => Date;
 }
 
-export function buildApp({ publisher, now, ...options }: AppOptions): FastifyInstance {
+export function buildApp({ publisher, repository, now, ...options }: AppOptions): FastifyInstance {
   const app = Fastify({
     ...options,
     ajv: {
@@ -26,7 +28,7 @@ export function buildApp({ publisher, now, ...options }: AppOptions): FastifyIns
   registerErrorHandler(app);
 
   app.get('/health', async () => ({ status: 'ok' }));
-  app.register(birthdayRoutes, { publisher, now });
+  app.register(birthdayRoutes, { publisher, repository, now });
 
   return app;
 }

@@ -26,10 +26,10 @@ Credentials, queue names and host ports have defaults in `docker-compose.yml`. T
 
 | Layer       | Command                       | What it covers                                                         |
 | ----------- | ----------------------------- | ---------------------------------------------------------------------- |
-| API         | `cd api && npm test`          | Vitest; routes exercised in-process via `inject()` with a fake publisher |
-| Frontend    | `cd frontend && npm test`     | Vitest + Vue Test Utils (jsdom), `fetch` mocked                        |
+| API         | `cd api && npm test`          | Vitest; routes exercised in-process via `inject()` with a fake publisher and repository |
+| Frontend    | `cd frontend && npm test`     | Vitest + Vue Test Utils (jsdom), `fetch` mocked, routes on an in-memory router |
 | Coordinator | `cd coordinator && mvn test`  | JUnit 5; reminder date maths and the submission listener (repository mocked) |
-| Stack       | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema, and a birthday submitted through the UI proxy landing in Postgres |
+| Stack       | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema, a birthday submitted through the UI proxy landing in Postgres, and `GET /api/birthdays` returning it |
 
 All three services' tests also run during their Docker image builds, so a failing test fails `docker compose up --build` (no local Maven needed for the Coordinator).
 
@@ -156,6 +156,19 @@ The API publishes this JSON to the `birthday.submissions` queue as a persistent 
 ```
 
 The Coordinator computes `next_reminder_on` and inserts the row with `ON CONFLICT (id) DO NOTHING`, so a redelivered message is ignored. If a message fails (for example, it can't be parsed or the database is down), the Coordinator tries it 3 times, then rejects it. RabbitMQ then moves it to `birthday.submissions.dlq` instead of redelivering it forever. Both services declare the queue with the same dead-letter arguments, so whichever starts first creates it correctly. Nothing reads the DLQ yet; inspect it in the RabbitMQ management UI.
+
+## Listing Birthdays
+
+The UI's home page (`/`) shows every birthday in a table; **Add a birthday** goes to the form at `/submit`. Both are client-side routes (Vue Router, HTML5 history); nginx serves `index.html` for any path, so reloading `/submit` works.
+
+### `GET /birthdays`
+
+| Status | Body | When |
+| ------ | ---- | ---- |
+| `200 OK` | `{ "birthdays": [{ "id": "<UUIDv7>", "name": "Ada Lovelace", "birthDate": "1815-12-10", "reminderWindowDays": 7 }] }` | Always, with an empty array if there are none. Most recently added first (`created_at DESC`). |
+| `500 Internal Server Error` | `{ "error": "InternalServerError", "message": "..." }` | The database query failed. |
+
+Submissions are written asynchronously by the Coordinator, so a birthday appears in the list shortly after `POST /birthdays` returns, not immediately. The list isn't paginated yet; the response is wrapped in an object so paging fields can be added later without breaking clients.
 
 ## Data Model
 

@@ -1,9 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { FakePublisher } from './fakes.js';
+import { FakeBirthdayRepository, FakePublisher } from './fakes.js';
 
 describe('GET /health', () => {
-  const app = buildApp({ publisher: new FakePublisher() });
+  const app = buildApp({ publisher: new FakePublisher(), repository: new FakeBirthdayRepository() });
 
   afterAll(() => app.close());
 

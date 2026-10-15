@@ -4,6 +4,10 @@ export interface BirthdaySubmission {
   reminderWindowDays: number;
 }
 
+export interface Birthday extends BirthdaySubmission {
+  id: string;
+}
+
 export interface FieldError {
   field: string;
   message: string;
@@ -21,16 +25,26 @@ export class ApiError extends Error {
   }
 }
 
-export async function submitBirthday(submission: BirthdaySubmission): Promise<{ id: string }> {
-  const response = await fetch('/api/birthdays', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(submission),
-  });
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api${path}`, init);
 
   const body = await response.json().catch(() => undefined);
   if (!response.ok) {
     throw new ApiError(body?.message ?? `Request failed with status ${response.status}`, response.status, body?.details);
   }
   return body;
+}
+
+export async function submitBirthday(submission: BirthdaySubmission): Promise<{ id: string }> {
+  return request('/birthdays', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(submission),
+  });
+}
+
+/** All stored birthdays, most recently added first. */
+export async function listBirthdays(): Promise<Birthday[]> {
+  const { birthdays } = await request<{ birthdays: Birthday[] }>('/birthdays');
+  return birthdays;
 }

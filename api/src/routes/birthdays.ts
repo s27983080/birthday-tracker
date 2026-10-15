@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { v7 as uuidv7 } from 'uuid';
+import type { BirthdayRepository } from '../db.js';
 import { ValidationError, type FieldError } from '../errors.js';
 import type { SubmissionPublisher } from '../queue.js';
 
@@ -39,15 +40,43 @@ const createBirthdaySchema = {
   },
 } as const;
 
+const listBirthdaysSchema = {
+  response: {
+    200: {
+      type: 'object',
+      required: ['birthdays'],
+      properties: {
+        birthdays: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id', 'name', 'birthDate', 'reminderWindowDays'],
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              birthDate: { type: 'string' },
+              reminderWindowDays: { type: 'integer' },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
 export interface BirthdayRoutesOptions {
   publisher: SubmissionPublisher;
+  repository: BirthdayRepository;
   now?: () => Date;
 }
 
 export const birthdayRoutes: FastifyPluginAsync<BirthdayRoutesOptions> = async (
   app,
-  { publisher, now = () => new Date() },
+  { publisher, repository, now = () => new Date() },
 ) => {
+  // Failures fall through to the error handler as a logged 500.
+  app.get('/birthdays', { schema: listBirthdaysSchema }, async () => ({ birthdays: await repository.list() }));
+
   app.post<{ Body: CreateBirthdayBody }>('/birthdays', { schema: createBirthdaySchema }, async (request, reply) => {
     const { birthDate, reminderWindowDays } = request.body;
     const name = request.body.name.trim();
