@@ -3,10 +3,20 @@ import { buildApp } from './app.js';
 import { createPgBirthdayRepository } from './db.js';
 import { createAmqpPublisher } from './queue.js';
 
+/** Reads a variable that has no safe default (it carries credentials); exits if it's unset. */
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`${name} must be set`);
+    process.exit(1);
+  }
+  return value;
+}
+
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
-const databaseUrl = process.env.DATABASE_URL ?? 'postgres://birthday:birthday@localhost:5432/birthdays';
-const rabbitmqUrl = process.env.RABBITMQ_URL ?? 'amqp://birthday:birthday@localhost:5672';
+const databaseUrl = requireEnv('DATABASE_URL');
+const rabbitmqUrl = requireEnv('RABBITMQ_URL');
 const submissionsQueue = process.env.SUBMISSIONS_QUEUE ?? 'birthday.submissions';
 
 let app: FastifyInstance | undefined;
