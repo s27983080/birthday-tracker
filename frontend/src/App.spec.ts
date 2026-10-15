@@ -44,6 +44,21 @@ describe('App', () => {
     expect(wrapper.find('form').exists()).toBe(true);
   });
 
+  it('navigates from a name in the list to its birthday page', async () => {
+    const ada = { id: '0199e3a0-0000-7000-8000-000000000001', name: 'Ada Lovelace', birthDate: '1815-12-10', reminderWindowDays: 7 };
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      new Response(JSON.stringify(String(url).endsWith(ada.id) ? ada : { birthdays: [ada] }), { status: 200 }),
+    );
+    const { wrapper, router } = await mountAt('/');
+
+    await wrapper.get('tbody a').trigger('click');
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe(`/birthdays/${ada.id}`);
+    expect(wrapper.get('h2').text()).toBe('Ada Lovelace');
+    expect(wrapper.find('table').exists()).toBe(false);
+  });
+
   it('navigates from the list to the form and back', async () => {
     const { wrapper, router } = await mountAt('/');
 

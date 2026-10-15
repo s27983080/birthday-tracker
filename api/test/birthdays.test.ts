@@ -60,7 +60,7 @@ describe('POST /birthdays', () => {
     const response = await post({});
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: 'ValidationError' });
+    expect(response.json()).toMatchObject({ error: 'ValidationError', message: 'Request body is invalid' });
     expect(response.json().details).toEqual(
       expect.arrayContaining([
         { field: 'name', message: 'is required' },
@@ -145,6 +145,61 @@ describe('GET /birthdays', () => {
     repository.failWith = new Error('connection refused');
 
     const response = await get();
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: 'InternalServerError', message: 'Something went wrong' });
+  });
+});
+
+describe('GET /birthdays/:id', () => {
+  const ada = {
+    id: '0199e3a0-0000-7000-8000-000000000001',
+    name: 'Ada Lovelace',
+    birthDate: '1815-12-10',
+    reminderWindowDays: 7,
+  };
+
+  let repository: FakeBirthdayRepository;
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    repository = new FakeBirthdayRepository();
+    repository.birthdays = [ada];
+    app = buildApp({ publisher: new FakePublisher(), repository });
+  });
+
+  afterEach(() => app.close());
+
+  const get = (id: string) => app.inject({ method: 'GET', url: `/birthdays/${id}` });
+
+  it('returns the birthday', async () => {
+    const response = await get(ada.id);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(ada);
+  });
+
+  it('returns 404 for an unknown id', async () => {
+    const response = await get('0199e3a0-0000-7000-8000-00000000ffff');
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: 'NotFound', message: 'Birthday not found' });
+  });
+
+  it('returns 400 for a malformed id without querying the database', async () => {
+    repository.failWith = new Error('should not be called');
+
+    const response = await get('not-a-uuid');
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: 'ValidationError', message: 'Request path is invalid' });
+    expect(response.json().details).toEqual([expect.objectContaining({ field: 'id' })]);
+  });
+
+  it('returns 500 when the database query fails', async () => {
+    repository.failWith = new Error('connection refused');
+
+    const response = await get(ada.id);
 
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ error: 'InternalServerError', message: 'Something went wrong' });

@@ -29,7 +29,7 @@ Credentials, queue names and host ports have defaults in `docker-compose.yml`. T
 | API         | `cd api && npm test`          | Vitest; routes exercised in-process via `inject()` with a fake publisher and repository |
 | Frontend    | `cd frontend && npm test`     | Vitest + Vue Test Utils (jsdom), `fetch` mocked, routes on an in-memory router |
 | Coordinator | `cd coordinator && mvn test`  | JUnit 5; reminder window maths, the reminder job and message, and the submission listener (repository and publisher mocked) |
-| Stack       | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema, a birthday submitted through the UI proxy landing in Postgres, `GET /api/birthdays` returning it, and the reminder job publishing a due reminder (restarts the Coordinator to trigger a run, and takes the messages off `birthday.reminders`) |
+| Stack       | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema, a birthday submitted through the UI proxy landing in Postgres, `GET /api/birthdays` and `GET /api/birthdays/:id` returning it (plus 404/400 for unknown and malformed ids), and the reminder job publishing a due reminder (restarts the Coordinator to trigger a run, and takes the messages off `birthday.reminders`) |
 
 All three services' tests also run during their Docker image builds, so a failing test fails `docker compose up --build` (no local Maven needed for the Coordinator).
 
@@ -158,9 +158,9 @@ The API publishes this JSON to the `birthday.submissions` queue as a persistent 
 
 The Coordinator inserts the row with `ON CONFLICT (id) DO NOTHING`, so a redelivered message is ignored. If a message fails (for example, it can't be parsed or the database is down), the Coordinator tries it 3 times, then rejects it. RabbitMQ then moves it to `birthday.submissions.dlq` instead of redelivering it forever. Both services declare the queue with the same dead-letter arguments, so whichever starts first creates it correctly. Nothing reads the DLQ yet; inspect it in the RabbitMQ management UI.
 
-## Listing Birthdays
+## Viewing Birthdays
 
-The UI's home page (`/`) shows every birthday in a table; **Add a birthday** goes to the form at `/submit`. Both are client-side routes (Vue Router, HTML5 history); nginx serves `index.html` for any path, so reloading `/submit` works.
+The UI's home page (`/`) shows every birthday in a table. Each name links to that birthday's page at `/birthdays/:id`, and **Add a birthday** goes to the form at `/submit`. All three are client-side routes (Vue Router, HTML5 history); nginx serves `index.html` for any path, so reloading any of them works. A birthday page for an id that doesn't exist, or isn't a valid id, says it couldn't find the birthday.
 
 ### `GET /birthdays`
 
@@ -170,6 +170,15 @@ The UI's home page (`/`) shows every birthday in a table; **Add a birthday** goe
 | `500 Internal Server Error` | `{ "error": "InternalServerError", "message": "..." }` | The database query failed. |
 
 Submissions are written asynchronously by the Coordinator, so a birthday appears in the list shortly after `POST /birthdays` returns, not immediately. The list isn't paginated yet; the response is wrapped in an object so paging fields can be added later without breaking clients.
+
+### `GET /birthdays/:id`
+
+| Status | Body | When |
+| ------ | ---- | ---- |
+| `200 OK` | `{ "id": "<UUIDv7>", "name": "Ada Lovelace", "birthDate": "1815-12-10", "reminderWindowDays": 7 }` | The birthday exists. |
+| `400 Bad Request` | `{ "error": "ValidationError", "message": "Request path is invalid", "details": [{ "field": "id", "message": "must match format \"uuid\"" }] }` | `id` isn't a UUID. Checked before querying, so a malformed id can't fail as a database error. |
+| `404 Not Found` | `{ "error": "NotFound", "message": "Birthday not found" }` | No birthday has that id (or the Coordinator hasn't stored it yet). |
+| `500 Internal Server Error` | `{ "error": "InternalServerError", "message": "..." }` | The database query failed. |
 
 ## Reminder Messages
 

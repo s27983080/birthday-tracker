@@ -76,6 +76,7 @@ if [[ "$status" == "202" && -n "$id" ]]; then
   if [[ "$row" == "Smoke Test" ]]; then
     pass "Coordinator stored the birthday"
     check "GET /api/birthdays lists the new birthday" "http://localhost:${FRONTEND_PORT}/api/birthdays" "\"id\":\"${id}\""
+    check "GET /api/birthdays/:id returns the new birthday" "http://localhost:${FRONTEND_PORT}/api/birthdays/${id}" '"name":"Smoke Test"'
   else
     fail "birthday ${id} not stored within 10s (got: '${row}')"
   fi
@@ -91,6 +92,22 @@ if [[ "$status" == "400" ]]; then
 else
   fail "invalid submission returned ${status}, expected 400"
 fi
+
+expect_status() {
+  local name="$1" url="$2" expected="$3" status
+  status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$url" || true)"
+  if [[ "$status" == "$expected" ]]; then
+    pass "$name"
+  else
+    fail "$name ($url): got ${status}, expected ${expected}"
+  fi
+}
+expect_status "GET /api/birthdays/:id returns 404 for an unknown id" \
+  "http://localhost:${FRONTEND_PORT}/api/birthdays/00000000-0000-7000-8000-000000000000" 404
+expect_status "GET /api/birthdays/:id returns 400 for a malformed id" \
+  "http://localhost:${FRONTEND_PORT}/api/birthdays/not-a-uuid" 400
+expect_status "Frontend serves the SPA for /birthdays/:id" \
+  "http://localhost:${FRONTEND_PORT}/birthdays/00000000-0000-7000-8000-000000000000" 200
 
 echo "Checking the reminder path (Coordinator job -> reminders_sent + birthday.reminders queue)..."
 # A birthday 3 days from now (30 years ago), so its 7-day reminder window includes today.

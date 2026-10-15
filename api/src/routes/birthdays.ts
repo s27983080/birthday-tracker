@@ -40,28 +40,35 @@ const createBirthdaySchema = {
   },
 } as const;
 
+const birthdaySchema = {
+  type: 'object',
+  required: ['id', 'name', 'birthDate', 'reminderWindowDays'],
+  properties: {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    birthDate: { type: 'string' },
+    reminderWindowDays: { type: 'integer' },
+  },
+} as const;
+
 const listBirthdaysSchema = {
   response: {
     200: {
       type: 'object',
       required: ['birthdays'],
-      properties: {
-        birthdays: {
-          type: 'array',
-          items: {
-            type: 'object',
-            required: ['id', 'name', 'birthDate', 'reminderWindowDays'],
-            properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              birthDate: { type: 'string' },
-              reminderWindowDays: { type: 'integer' },
-            },
-          },
-        },
-      },
+      properties: { birthdays: { type: 'array', items: birthdaySchema } },
     },
   },
+} as const;
+
+const getBirthdaySchema = {
+  // Rejecting a malformed id here keeps it from reaching Postgres, where the uuid cast would fail as a 500.
+  params: {
+    type: 'object',
+    required: ['id'],
+    properties: { id: { type: 'string', format: 'uuid' } },
+  },
+  response: { 200: birthdaySchema },
 } as const;
 
 export interface BirthdayRoutesOptions {
@@ -76,6 +83,14 @@ export const birthdayRoutes: FastifyPluginAsync<BirthdayRoutesOptions> = async (
 ) => {
   // Failures fall through to the error handler as a logged 500.
   app.get('/birthdays', { schema: listBirthdaysSchema }, async () => ({ birthdays: await repository.list() }));
+
+  app.get<{ Params: { id: string } }>('/birthdays/:id', { schema: getBirthdaySchema }, async (request, reply) => {
+    const birthday = await repository.get(request.params.id);
+    if (!birthday) {
+      return reply.code(404).send({ error: 'NotFound', message: 'Birthday not found' });
+    }
+    return birthday;
+  });
 
   app.post<{ Body: CreateBirthdayBody }>('/birthdays', { schema: createBirthdaySchema }, async (request, reply) => {
     const { birthDate, reminderWindowDays } = request.body;

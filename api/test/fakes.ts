@@ -24,5 +24,10 @@ export class FakeBirthdayRepository implements BirthdayRepository {
     return this.birthdays;
   }
 
+  async get(id: string): Promise<Birthday | undefined> {
+    if (this.failWith) throw this.failWith;
+    return this.birthdays.find((b) => b.id === id);
+  }
+
   async close(): Promise<void> {}
 }

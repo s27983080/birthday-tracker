@@ -48,3 +48,8 @@ export async function listBirthdays(): Promise<Birthday[]> {
   const { birthdays } = await request<{ birthdays: Birthday[] }>('/birthdays');
   return birthdays;
 }
+
+/** One birthday. Rejects with an ApiError of status 404 if it doesn't exist (400 for a malformed id). */
+export async function getBirthday(id: string): Promise<Birthday> {
+  return request(`/birthdays/${encodeURIComponent(id)}`);
+}

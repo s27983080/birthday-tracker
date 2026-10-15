@@ -38,7 +38,9 @@ export function registerErrorHandler(app: FastifyInstance): void {
           : undefined;
 
     if (details) {
-      return reply.code(400).send({ error: 'ValidationError', message: 'Request body is invalid', details });
+      // ValidationError is only thrown for body rules; schema errors say which part of the request failed.
+      const part = !(error instanceof ValidationError) && error.validationContext === 'params' ? 'path' : 'body';
+      return reply.code(400).send({ error: 'ValidationError', message: `Request ${part} is invalid`, details });
     }
 
     const statusCode = (error as FastifyError).statusCode ?? 500;

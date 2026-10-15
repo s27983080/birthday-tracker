@@ -1,0 +1,88 @@
+<script setup lang="ts">
+import { ref, watch } from 'vue';
+import { ApiError, getBirthday, type Birthday } from '../api/birthdays';
+import { formatBirthDate, formatReminderWindow } from '../format';
+
+const props = defineProps<{ id: string }>();
+
+const birthday = ref<Birthday>();
+const loading = ref(true);
+const notFound = ref(false);
+const errorMessage = ref('');
+
+async function load(id: string) {
+  loading.value = true;
+  notFound.value = false;
+  errorMessage.value = '';
+  birthday.value = undefined;
+
+  try {
+    const result = await getBirthday(id);
+    // Ignore a response for an id we've since navigated away from.
+    if (id === props.id) birthday.value = result;
+  } catch (err) {
+    if (id !== props.id) return;
+    // 400 means the id in the URL isn't a valid id at all, which to the user is the same as not found.
+    if (err instanceof ApiError && (err.status === 404 || err.status === 400)) {
+      notFound.value = true;
+    } else {
+      errorMessage.value = 'Something went wrong loading this birthday. Please try again.';
+    }
+  } finally {
+    if (id === props.id) loading.value = false;
+  }
+}
+
+// Vue Router reuses this component when moving between birthdays, so reload whenever the id changes.
+watch(() => props.id, load, { immediate: true });
+</script>
+
+<template>
+  <RouterLink :to="{ name: 'birthdays' }" class="back-link">← Back to birthdays</RouterLink>
+
+  <p v-if="loading" role="status">Loading birthday…</p>
+  <p v-else-if="notFound" class="not-found">We couldn't find that birthday.</p>
+  <p v-else-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
+  <article v-else-if="birthday" class="birthday">
+    <h2>{{ birthday.name }}</h2>
+    <dl>
+      <dt>Birthday</dt>
+      <dd>
+        <time :datetime="birthday.birthDate">{{ formatBirthDate(birthday.birthDate) }}</time>
+      </dd>
+      <dt>Reminder</dt>
+      <dd>{{ formatReminderWindow(birthday.reminderWindowDays) }}</dd>
+    </dl>
+  </article>
+</template>
+
+<style scoped>
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.5rem;
+  margin: 0;
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0;
+}
+
+.error {
+  color: #b00020;
+  margin: 0;
+}
+
+.not-found {
+  margin: 0;
+}
+</style>

@@ -46,6 +46,20 @@ describe('BirthdayListView', () => {
     expect(wrapper.get('time').attributes('datetime')).toBe('1906-12-09');
   });
 
+  it('links each name to its birthday page', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        birthdays: [{ id: '0199e3a0-0000-7000-8000-000000000001', name: 'Ada Lovelace', birthDate: '1815-12-10', reminderWindowDays: 7 }],
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    const link = wrapper.get('tbody a');
+    expect(link.text()).toBe('Ada Lovelace');
+    expect(link.attributes('href')).toBe('/birthdays/0199e3a0-0000-7000-8000-000000000001');
+  });
+
   it('shows a loading message until the request completes', async () => {
     let resolve!: (r: Response) => void;
     fetchMock.mockReturnValue(new Promise((r) => (resolve = r)));

@@ -38,7 +38,9 @@ onMounted(async () => {
       </thead>
       <tbody>
         <tr v-for="birthday in birthdays" :key="birthday.id">
-          <td>{{ birthday.name }}</td>
+          <td>
+            <RouterLink :to="{ name: 'birthday', params: { id: birthday.id } }">{{ birthday.name }}</RouterLink>
+          </td>
           <td>
             <time :datetime="birthday.birthDate">{{ formatBirthDate(birthday.birthDate) }}</time>
           </td>
