@@ -24,18 +24,20 @@ Credentials, queue names and host ports have defaults in `docker-compose.yml`. T
 
 ### Tests
 
-| Layer    | Command                       | What it covers                                    |
-| -------- | ----------------------------- | ------------------------------------------------- |
-| API      | `cd api && npm test`          | Vitest; routes exercised in-process via `inject()` |
-| Frontend | `cd frontend && npm test`     | Vitest + Vue Test Utils (jsdom)                   |
-| Stack    | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema |
+| Layer       | Command                       | What it covers                                                         |
+| ----------- | ----------------------------- | ---------------------------------------------------------------------- |
+| API         | `cd api && npm test`          | Vitest; routes exercised in-process via `inject()` with a fake publisher |
+| Frontend    | `cd frontend && npm test`     | Vitest + Vue Test Utils (jsdom), `fetch` mocked                        |
+| Coordinator | `cd coordinator && mvn test`  | JUnit 5; reminder date maths and the submission listener (repository mocked) |
+| Stack       | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema, and a birthday submitted through the UI proxy landing in Postgres |
 
-API and frontend tests also run during their Docker image builds, so a failing test fails `docker compose up --build`. Coordinator tests are not set up yet.
+All three services' tests also run during their Docker image builds, so a failing test fails `docker compose up --build` (no local Maven needed for the Coordinator).
 
 ### Troubleshooting
 
 - **Coordinator restarts with `password authentication failed for user "birthday"`, or the `birthdays` table is missing:** Postgres only runs `db/init` when its data volume is first created. If the `pgdata` volume was created earlier with different settings, reset it with `docker compose down -v` (this deletes local data).
 - **`ports are not available`:** another process is using a host port. Set `API_PORT`, `COORDINATOR_PORT` or `FRONTEND_PORT` in `.env`.
+- **API or Coordinator fails with `PRECONDITION_FAILED - inequivalent arg 'x-dead-letter-exchange'`:** the `birthday.submissions` queue in the `rabbitmqdata` volume was declared before it had a dead-letter queue. Reset with `docker compose down -v`.
 
 ## Repository Layout
 
@@ -124,6 +126,37 @@ flowchart LR
 
 **Trade-offs:** Message delivery can be repeated, so consumers must handle duplicate messages safely. Broker persistence and application-level failure handling also need to be configured.
 
+## Submitting a Birthday
+
+### `POST /birthdays`
+
+```json
+{ "name": "Ada Lovelace", "birthDate": "1815-12-10", "reminderWindowDays": 7 }
+```
+
+| Status | Body | When |
+| ------ | ---- | ---- |
+| `202 Accepted` | `{ "id": "<UUIDv7>" }` | Valid, and RabbitMQ confirmed the message. The row appears in the database shortly after, once the Coordinator processes it. |
+| `400 Bad Request` | `{ "error": "ValidationError", "message": "...", "details": [{ "field": "name", "message": "is required" }] }` | Any rule below fails. Every failing field is listed. |
+| `503 Service Unavailable` | `{ "error": "ServiceUnavailable", "message": "..." }` | The message couldn't be published and confirmed within 5 seconds. |
+
+Validation rules (in [`api/src/routes/birthdays.ts`](api/src/routes/birthdays.ts)):
+
+- All three fields are required, and unknown fields are rejected.
+- `name`: a string of up to 200 characters (the column limit), not blank. Leading and trailing whitespace is trimmed.
+- `birthDate`: a real calendar date in `YYYY-MM-DD` format, not in the future (compared with today's date in UTC).
+- `reminderWindowDays`: an integer from 1 to 14. Strings such as `"7"` are rejected rather than converted.
+
+### Submission message
+
+The API publishes this JSON to the `birthday.submissions` queue as a persistent message with publisher confirms, and the Coordinator consumes it:
+
+```json
+{ "id": "01a13d57-…", "name": "Ada Lovelace", "birthDate": "1815-12-10", "reminderWindowDays": 7, "submittedAt": "2026-10-14T12:00:00.000Z" }
+```
+
+The Coordinator computes `next_reminder_on` and inserts the row with `ON CONFLICT (id) DO NOTHING`, so a redelivered message is ignored. If a message fails (for example, it can't be parsed or the database is down), the Coordinator tries it 3 times, then rejects it. RabbitMQ then moves it to `birthday.submissions.dlq` instead of redelivering it forever. Both services declare the queue with the same dead-letter arguments, so whichever starts first creates it correctly. Nothing reads the DLQ yet; inspect it in the RabbitMQ management UI.
+
 ## Data Model
 
 Both backends share one table, `birthdays`, defined in [`db/init/001_create_birthdays.sql`](db/init/001_create_birthdays.sql).
@@ -150,6 +183,7 @@ Indexes: primary key on `id`, `next_reminder_on` for the daily reminder job, `lo
   - is a simple index lookup, with no month/day wrap-around at year end;
   - catches up automatically if the job misses a day, because overdue reminders still match `<=`;
   - is safe to rerun on the same day, because published rows have already moved to next year.
+- **A late submission gets next year's reminder.** On insert, `next_reminder_on` is the earliest reminder date on or after today. If this year's reminder date has already passed (for example, the birthday is in 3 days and the window is 7), the first reminder is next year's, even though this year's birthday hasn't happened yet. A reminder due today counts. The rule is in `ReminderDateCalculator`.
 - **`birth_date` is a plain `DATE`.** A birthday has no time or time zone. The year is kept (useful for age), and reminder dates are based on month and day.
 - **The API owns validation.** Value rules (non-blank name, no future birth dates, a 1–14 day window, a valid email) live in the API, the only entry point for submissions. The database has no `CHECK` constraints and enforces only types, `NOT NULL` and the 200-character limits. The trade-off: any other code that writes to the table directly (scripts, a future service) bypasses those rules.
 

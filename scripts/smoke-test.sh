@@ -55,6 +55,42 @@ else
   fail "birthdays table is missing (was the pgdata volume created before db/init ran?)"
 fi
 
+echo "Checking the submission write path (UI proxy -> API -> RabbitMQ -> Coordinator -> Postgres)..."
+psql_query() {
+  docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' sh "$1"
+}
+status_and_body="$(curl -sS --max-time 10 -w '\n%{http_code}' -H 'Content-Type: application/json' \
+  -d '{"name":"Smoke Test","birthDate":"1990-01-15","reminderWindowDays":7}' \
+  "http://localhost:${FRONTEND_PORT}/api/birthdays" 2>&1 || true)"
+status="${status_and_body##*$'\n'}"
+body="${status_and_body%$'\n'*}"
+id="$(sed -n 's/.*"id":"\([0-9a-f-]\{36\}\)".*/\1/p' <<<"$body")"
+if [[ "$status" == "202" && -n "$id" ]]; then
+  pass "POST /api/birthdays accepted ($id)"
+  row=""
+  for _ in $(seq 1 20); do
+    row="$(psql_query "select name, next_reminder_on is not null from birthdays where id = '${id}'" || true)"
+    [[ -n "$row" ]] && break
+    sleep 0.5
+  done
+  if [[ "$row" == "Smoke Test|t" ]]; then
+    pass "Coordinator stored the birthday with next_reminder_on"
+  else
+    fail "birthday ${id} not stored within 10s (got: '${row}')"
+  fi
+else
+  fail "POST /api/birthdays returned ${status}: ${body}"
+fi
+
+status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+  -d '{"name":"Smoke Test","birthDate":"1990-01-15","reminderWindowDays":15}' \
+  "http://localhost:${FRONTEND_PORT}/api/birthdays" || true)"
+if [[ "$status" == "400" ]]; then
+  pass "POST /api/birthdays rejects an invalid reminder window"
+else
+  fail "invalid submission returned ${status}, expected 400"
+fi
+
 if (( failures > 0 )); then
   echo "${failures} check(s) failed."
   exit 1

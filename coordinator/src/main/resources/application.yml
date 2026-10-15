@@ -10,6 +10,17 @@ spring:
     port: ${SPRING_RABBITMQ_PORT:5672}
     username: ${SPRING_RABBITMQ_USERNAME:birthday}
     password: ${SPRING_RABBITMQ_PASSWORD:birthday}
+    listener:
+      simple:
+        # Retry a failing message in-process a few times (e.g. a database blip), then reject it
+        # without requeueing so RabbitMQ dead-letters it to <submissions queue>.dlq instead of
+        # redelivering it forever.
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
 
 birthday-tracker:
   queues:
