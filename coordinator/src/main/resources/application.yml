@@ -3,13 +3,14 @@ spring:
     name: coordinator
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/birthdays}
-    username: ${SPRING_DATASOURCE_USERNAME:birthday}
-    password: ${SPRING_DATASOURCE_PASSWORD:birthday}
+    # Credentials have no defaults, so startup fails with "Could not resolve placeholder" if they're unset.
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
   rabbitmq:
     host: ${SPRING_RABBITMQ_HOST:localhost}
     port: ${SPRING_RABBITMQ_PORT:5672}
-    username: ${SPRING_RABBITMQ_USERNAME:birthday}
-    password: ${SPRING_RABBITMQ_PASSWORD:birthday}
+    username: ${SPRING_RABBITMQ_USERNAME}
+    password: ${SPRING_RABBITMQ_PASSWORD}
     # Lets ReminderPublisher wait for the broker to confirm each reminder before advancing its row.
     publisher-confirm-type: simple
     listener:
