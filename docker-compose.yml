@@ -74,6 +74,7 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-birthday}
       SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-birthday}
+      REMINDER_CRON: ${REMINDER_CRON:-0 0 6 * * *}
     ports:
       - "${COORDINATOR_PORT:-8082}:8080"
     depends_on:

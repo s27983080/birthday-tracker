@@ -28,14 +28,15 @@ Credentials, queue names and host ports have defaults in `docker-compose.yml`. T
 | ----------- | ----------------------------- | ---------------------------------------------------------------------- |
 | API         | `cd api && npm test`          | Vitest; routes exercised in-process via `inject()` with a fake publisher and repository |
 | Frontend    | `cd frontend && npm test`     | Vitest + Vue Test Utils (jsdom), `fetch` mocked, routes on an in-memory router |
-| Coordinator | `cd coordinator && mvn test`  | JUnit 5; reminder date maths and the submission listener (repository mocked) |
-| Stack       | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema, a birthday submitted through the UI proxy landing in Postgres, and `GET /api/birthdays` returning it |
+| Coordinator | `cd coordinator && mvn test`  | JUnit 5; reminder window maths, the reminder job and message, and the submission listener (repository and publisher mocked) |
+| Stack       | `./scripts/smoke-test.sh`     | Container health, endpoints, `/api` proxy, schema, a birthday submitted through the UI proxy landing in Postgres, `GET /api/birthdays` returning it, and the reminder job publishing a due reminder (restarts the Coordinator to trigger a run, and takes the messages off `birthday.reminders`) |
 
 All three services' tests also run during their Docker image builds, so a failing test fails `docker compose up --build` (no local Maven needed for the Coordinator).
 
 ### Troubleshooting
 
 - **Coordinator restarts with `password authentication failed for user "birthday"`, or the `birthdays` table is missing:** Postgres only runs `db/init` when its data volume is first created. If the `pgdata` volume was created earlier with different settings, reset it with `docker compose down -v` (this deletes local data).
+- **Coordinator logs `column "next_reminder_on" ... violates not-null constraint` or `relation "reminders_sent" does not exist`:** the `pgdata` volume has the schema from before the reminder job. Reset it with `docker compose down -v` (this deletes local data).
 - **`ports are not available`:** another process is using a host port. Set `API_PORT`, `COORDINATOR_PORT` or `FRONTEND_PORT` in `.env`.
 - **API or Coordinator fails with `PRECONDITION_FAILED - inequivalent arg 'x-dead-letter-exchange'`:** the `birthday.submissions` queue in the `rabbitmqdata` volume was declared before it had a dead-letter queue. Reset with `docker compose down -v`.
 
@@ -155,7 +156,7 @@ The API publishes this JSON to the `birthday.submissions` queue as a persistent 
 { "id": "01a13d57-…", "name": "Ada Lovelace", "birthDate": "1815-12-10", "reminderWindowDays": 7, "submittedAt": "2026-10-14T12:00:00.000Z" }
 ```
 
-The Coordinator computes `next_reminder_on` and inserts the row with `ON CONFLICT (id) DO NOTHING`, so a redelivered message is ignored. If a message fails (for example, it can't be parsed or the database is down), the Coordinator tries it 3 times, then rejects it. RabbitMQ then moves it to `birthday.submissions.dlq` instead of redelivering it forever. Both services declare the queue with the same dead-letter arguments, so whichever starts first creates it correctly. Nothing reads the DLQ yet; inspect it in the RabbitMQ management UI.
+The Coordinator inserts the row with `ON CONFLICT (id) DO NOTHING`, so a redelivered message is ignored. If a message fails (for example, it can't be parsed or the database is down), the Coordinator tries it 3 times, then rejects it. RabbitMQ then moves it to `birthday.submissions.dlq` instead of redelivering it forever. Both services declare the queue with the same dead-letter arguments, so whichever starts first creates it correctly. Nothing reads the DLQ yet; inspect it in the RabbitMQ management UI.
 
 ## Listing Birthdays
 
@@ -170,9 +171,26 @@ The UI's home page (`/`) shows every birthday in a table; **Add a birthday** goe
 
 Submissions are written asynchronously by the Coordinator, so a birthday appears in the list shortly after `POST /birthdays` returns, not immediately. The list isn't paginated yet; the response is wrapped in an object so paging fields can be added later without breaking clients.
 
+## Reminder Messages
+
+The Coordinator's `ReminderJob` runs daily at 06:00 UTC (`REMINDER_CRON`), and once whenever the Coordinator starts so a run missed while it was down happens straight away. For every birthday whose reminder window includes today, from `reminder_window_days` before the birthday up to and including the day itself, it publishes one reminder to the `birthday.reminders` queue unless `reminders_sent` shows it already went out:
+
+```json
+{ "reminderId": "2efade9b-…", "birthdayId": "01a13d57-…", "name": "Ada Lovelace", "birthDate": "1815-12-10",
+  "birthdayOn": "2026-12-10", "reminderWindowDays": 7, "reminderEmail": null, "publishedAt": "2026-12-03T06:00:00Z" }
+```
+
+- **`birthdayOn`** is the upcoming birthday the reminder is for, so the email service doesn't need to redo the date maths. February 29 birthdays fall on February 28 in non-leap years.
+- **`reminderEmail` is always `null` for now.** The UI doesn't collect an email yet, so the email team's service has to resolve the recipient until it does.
+- **Delivery is at least once.** Each reminder is recorded in `reminders_sent` and published in one transaction, committed only after RabbitMQ confirms the message. If publishing fails, the record rolls back and the next run retries. If the confirm arrives but the commit fails, the next run sends it again; `reminderId` is the same for every send of one birthday's reminder in a given year, so the consumer can drop the duplicate.
+- **Missed days catch up; a missed window doesn't.** Any day inside the window counts as due, so a job that was down for a few days still sends the reminder. Once the birthday has passed, it's no longer due, so a reminder is never sent after the birthday it's for.
+- **A late submission still gets this year's reminder.** A birthday submitted 3 days before it happens with a 7-day window is already inside its window, so the next run (at the latest the following 06:00) sends it.
+- **Several Coordinators can run the job at once.** The `reminders_sent` primary key makes a second instance's insert for the same reminder wait, then conflict, so only one publishes it.
+- **The queue has no dead-letter queue.** What to do with reminders the email service can't process is that team's decision.
+
 ## Data Model
 
-Both backends share one table, `birthdays`, defined in [`db/init/001_create_birthdays.sql`](db/init/001_create_birthdays.sql).
+Both backends share the `birthdays` table, defined in [`db/init/001_create_birthdays.sql`](db/init/001_create_birthdays.sql). The Coordinator also owns `reminders_sent` ([`db/init/002_create_reminders_sent.sql`](db/init/002_create_reminders_sent.sql)).
 
 | Column                 | Type          | Notes                                                                 |
 | ---------------------- | ------------- | --------------------------------------------------------------------- |
@@ -181,26 +199,33 @@ Both backends share one table, `birthdays`, defined in [`db/init/001_create_birt
 | `birth_date`           | `DATE`        | Required; the API rejects future dates                                |
 | `reminder_window_days` | `SMALLINT`    | Required; the API accepts 1–14 days before the birthday               |
 | `reminder_email`       | `VARCHAR(200)` | Optional for now; who the email service should send the reminder to  |
-| `next_reminder_on`     | `DATE`        | Required; when the next reminder is due. Maintained by the Coordinator |
 | `created_at`           | `TIMESTAMPTZ` | Defaults to `now()`                                                   |
 | `updated_at`           | `TIMESTAMPTZ` | Defaults to `now()`                                                   |
 
-Indexes: primary key on `id`, `next_reminder_on` for the daily reminder job, `lower(name)` for name lookups, and `created_at DESC` for the default list order.
+Indexes: primary key on `id`, `lower(name)` for name lookups, and `created_at DESC` for the default list order.
+
+`reminders_sent` has one row per reminder published:
+
+| Column        | Type          | Notes                                                                       |
+| ------------- | ------------- | --------------------------------------------------------------------------- |
+| `birthday_id` | `UUID`        | References `birthdays(id)`; rows are deleted with the birthday              |
+| `birthday_on` | `DATE`        | The birthday occurrence the reminder was for                                |
+| `reminder_id` | `UUID` unique | The message's `reminderId`                                                  |
+| `sent_at`     | `TIMESTAMPTZ` | Defaults to `now()`                                                         |
+
+Primary key: `(birthday_id, birthday_on)`, so each birthday gets at most one reminder per occurrence.
 
 **Decisions:**
 
 - **The API generates `id` as a UUIDv7.** The API puts the id in each submission message and can return it to the UI right away (`202 Accepted`). The Coordinator writes with `INSERT ... ON CONFLICT (id) DO NOTHING`, so a message RabbitMQ delivers twice still produces only one row. v7 UUIDs are time-ordered, which keeps the primary key index compact (random v4 UUIDs scatter inserts across it).
 - **Each birthday stores a `reminder_email`.** The requirements don't say who receives reminder emails, but the email team's service needs a recipient, so each reminder message includes it. It's nullable for now, until the submission form collects it; how to handle reminders without a recipient is still to be decided. Once user accounts exist, this would become an owner reference.
-- **The reminder schedule is stored as `next_reminder_on`, not computed each run.** The Coordinator computes it when it writes a birthday (`next birthday − reminder_window_days`). After it publishes a reminder, it moves the date to the following year's reminder. The daily job then just runs `WHERE next_reminder_on <= CURRENT_DATE`, which:
-  - keeps the window maths and the February 29 rule (remind as if Feb 28 in non-leap years) in one place in the Coordinator, instead of in the query;
-  - is a simple index lookup, with no month/day wrap-around at year end;
-  - catches up automatically if the job misses a day, because overdue reminders still match `<=`;
-  - is safe to rerun on the same day, because published rows have already moved to next year.
-- **A late submission gets next year's reminder.** On insert, `next_reminder_on` is the earliest reminder date on or after today. If this year's reminder date has already passed (for example, the birthday is in 3 days and the window is 7), the first reminder is next year's, even though this year's birthday hasn't happened yet. A reminder due today counts. The rule is in `ReminderDateCalculator`.
+- **Reminders are worked out each run, and only what was sent is stored.** Each run checks every birthday's window from `birth_date` and `reminder_window_days` (`ReminderDateCalculator`, in Java, including the Feb 29 rule), then skips those already in `reminders_sent`. The alternative was storing a `next_reminder_on` date on each birthday and advancing it after each reminder, which is a cheaper indexed query but is derived state: editing a birth date or window, or changing a rule, would need it recalculated or backfilled. With nothing derived stored, edits and rule changes apply on the next run, and `reminders_sent` doubles as an audit log. Reruns and catch-up runs are safe because of its primary key.
+- **The job reads every birthday each run.** That's fine for thousands or a few hundred thousand rows. At larger scale, pre-filter in SQL to birthdays whose month and day fall in the next 14 days (taking care with the year end and Feb 29), keeping the Java check as the final word.
 - **`birth_date` is a plain `DATE`.** A birthday has no time or time zone. The year is kept (useful for age), and reminder dates are based on month and day.
 - **The API owns validation.** Value rules (non-blank name, no future birth dates, a 1–14 day window, a valid email) live in the API, the only entry point for submissions. The database has no `CHECK` constraints and enforces only types, `NOT NULL` and the 200-character limits. The trade-off: any other code that writes to the table directly (scripts, a future service) bypasses those rules.
 
 **Trade-offs / future work:**
 
-- **Publishing and updating aren't atomic.** If the Coordinator publishes a reminder and then fails before moving `next_reminder_on`, the next run sends it again. If it moves the date first and then publishing fails, the reminder is lost. A transactional outbox (save the outgoing message in the same transaction as the update, and publish it separately) would close this gap.
+- **Publishing and committing aren't atomic.** If RabbitMQ confirms a reminder but the `reminders_sent` commit then fails, the next run sends it again (consumers dedupe on `reminderId`). Adding a `status` column to `reminders_sent` would turn it into a transactional outbox: commit the row as `pending`, then publish pending rows separately and mark them `published`.
+- **`reminders_sent` grows by one row per birthday per year.** Prune rows older than a year if the audit trail isn't needed.
 - **The init script only runs on a new volume.** That's fine for a local stack. Production schema changes should go through a migration tool such as Flyway, owned by one service.

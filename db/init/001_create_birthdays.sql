@@ -15,14 +15,9 @@ CREATE TABLE IF NOT EXISTS birthdays (
     -- Who the email team's service should send the reminder to; included in each reminder message.
     -- Nullable for now, until the UI collects it.
     reminder_email        VARCHAR(200),
-    -- Date the next reminder is due. Set by the Coordinator on insert, and advanced to the following
-    -- year's reminder after it publishes one. The daily job selects WHERE next_reminder_on <= today,
-    -- so a missed run catches up the next day. Feb 29 birthdays fall on Feb 28 in non-leap years.
-    next_reminder_on      DATE        NOT NULL,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS birthdays_next_reminder_on_idx ON birthdays (next_reminder_on);
 CREATE INDEX IF NOT EXISTS birthdays_name_idx ON birthdays (lower(name));
 CREATE INDEX IF NOT EXISTS birthdays_created_at_idx ON birthdays (created_at DESC);

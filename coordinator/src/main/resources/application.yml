@@ -10,6 +10,8 @@ spring:
     port: ${SPRING_RABBITMQ_PORT:5672}
     username: ${SPRING_RABBITMQ_USERNAME:birthday}
     password: ${SPRING_RABBITMQ_PASSWORD:birthday}
+    # Lets ReminderPublisher wait for the broker to confirm each reminder before advancing its row.
+    publisher-confirm-type: simple
     listener:
       simple:
         # Retry a failing message in-process a few times (e.g. a database blip), then reject it
@@ -26,6 +28,9 @@ birthday-tracker:
   queues:
     submissions: ${SUBMISSIONS_QUEUE:birthday.submissions}
     reminders: ${REMINDERS_QUEUE:birthday.reminders}
+  reminders:
+    # Daily reminder run (UTC). The job also runs once at startup to catch up on a missed run.
+    cron: ${REMINDER_CRON:0 0 6 * * *}
 
 management:
   endpoints:

@@ -2,6 +2,7 @@ package com.birthdaytracker.coordinator.reminder;
 
 import java.time.LocalDate;
 import java.time.MonthDay;
+import java.util.Optional;
 
 /** Works out when a birthday's reminder is due. */
 public final class ReminderDateCalculator {
@@ -10,21 +11,27 @@ public final class ReminderDateCalculator {
     }
 
     /**
-     * Returns the earliest reminder date on or after {@code today}: the birthday's occurrence in a given
-     * year minus {@code reminderWindowDays}. If this year's reminder date has already passed, the next
-     * reminder is next year's, even when this year's birthday is still upcoming.
-     *
-     * <p>February 29 birthdays occur on February 28 in non-leap years.
+     * Returns the birthday's next occurrence on or after {@code today}. February 29 birthdays occur on
+     * February 28 in non-leap years.
      */
-    public static LocalDate nextReminderOn(LocalDate birthDate, int reminderWindowDays, LocalDate today) {
+    public static LocalDate nextOccurrence(LocalDate birthDate, LocalDate today) {
         MonthDay birthday = MonthDay.from(birthDate);
-        // A reminder can fall in the year before its birthday (e.g. Jan 3 with a 7-day window), so
-        // start from the birthday in today's year and move forward until the reminder isn't past.
-        for (int year = today.getYear(); ; year++) {
-            LocalDate reminder = birthday.atYear(year).minusDays(reminderWindowDays);
-            if (!reminder.isBefore(today)) {
-                return reminder;
-            }
-        }
+        // MonthDay.atYear moves Feb 29 to Feb 28 in non-leap years.
+        LocalDate thisYear = birthday.atYear(today.getYear());
+        return thisYear.isBefore(today) ? birthday.atYear(today.getYear() + 1) : thisYear;
+    }
+
+    /**
+     * Returns the upcoming birthday a reminder is due for, if {@code today} falls inside its reminder
+     * window: from {@code reminderWindowDays} before the birthday up to and including the birthday.
+     *
+     * <p>Treating the whole window as due, not just its first day, means a run that missed a few days
+     * still sends the reminder. Once the birthday has passed, the next occurrence is a year away, so a
+     * reminder whose entire window was missed is never sent late.
+     */
+    public static Optional<LocalDate> dueBirthday(LocalDate birthDate, int reminderWindowDays, LocalDate today) {
+        LocalDate birthdayOn = nextOccurrence(birthDate, today);
+        boolean inWindow = !today.isBefore(birthdayOn.minusDays(reminderWindowDays));
+        return inWindow ? Optional.of(birthdayOn) : Optional.empty();
     }
 }
