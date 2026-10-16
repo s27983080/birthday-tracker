@@ -313,7 +313,7 @@ The message flow is built to survive failures: publisher confirms, durable queue
 - **Limits in the API** with `@fastify/rate-limit`, returning `429` with a `Retry-After` header: a tight limit on `POST /birthdays` and a looser one on reads. Once authentication exists, limit per user rather than per IP. With more than one API instance, keep the counters in a shared store such as Redis so the limit applies across instances.
 - **Trust the proxy.** The API runs behind nginx, so without Fastify's `trustProxy` option every request appears to come from nginx's address, and a per-IP limit would throttle everyone together. Trust only the proxy's address, so clients can't spoof `X-Forwarded-For`.
 - **A smaller request body limit.** Fastify accepts bodies up to 1 MiB by default; a submission is under 1 KiB, so a few KiB is plenty.
-- **Pagination on `GET /birthdays`** (cursor-based, on `created_at` and `id`). The response is already wrapped in an object so paging fields can be added without breaking clients.
+- **Pagination and sorting on `GET /birthdays`.** Page numbers (`page`, `limit`, `sort`, `order`) with a `total` count in the response, to match a server-side data table in the UI. `sort` accepts only a fixed list of columns, and sorting by birth date needs an index on `birth_date`. If the table grows large enough for `OFFSET` and `COUNT(*)` to get slow, switch to cursor pagination on `created_at` and `id`. The response is already wrapped in an object so paging fields can be added without breaking clients.
 
 ### Data Model and Reminders
 
