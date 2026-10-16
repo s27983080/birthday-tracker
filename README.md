@@ -245,8 +245,78 @@ Primary key: `(birthday_id, birthday_on)`, so each birthday gets at most one rem
 - **`birth_date` is a plain `DATE`.** A birthday has no time or time zone. The year is kept (useful for age), and reminder dates are based on month and day.
 - **The API owns validation.** Value rules (non-blank name, no future birth dates, a 1–14 day window, a valid email) live in the API, the only entry point for submissions. The database has no `CHECK` constraints and enforces only types, `NOT NULL` and the 200-character limits. The trade-off: any other code that writes to the table directly (scripts, a future service) bypasses those rules.
 
-**Trade-offs / future work:**
+## Production Readiness & Future Enhancements
 
-- **Publishing and committing aren't atomic.** If RabbitMQ confirms a reminder but the `reminders_sent` commit then fails, the next run sends it again (consumers dedupe on `reminderId`). Adding a `status` column to `reminders_sent` would turn it into a transactional outbox: commit the row as `pending`, then publish pending rows separately and mark them `published`.
-- **`reminders_sent` grows by one row per birthday per year.** Prune rows older than a year if the audit trail isn't needed.
-- **The init script only runs on a new volume.** That's fine for a local stack. Production schema changes should go through a migration tool such as Flyway, owned by one service.
+The message flow is built to survive failures: publisher confirms, durable queues and persistent messages, idempotent inserts, a reminder ledger, a dead-letter queue for submissions, graceful shutdown, and non-root API and Coordinator images. The gaps below are what this repo still needs before it runs in production, roughly in priority order, followed by enhancements to the data model and reminder job.
+
+### Authentication
+
+**Today:** none. The brief says the HTTP APIs don't need authentication, so anyone who can reach the UI can submit birthdays and read every stored one. Names and birth dates are personal data.
+
+**Needed:**
+
+- **User sign-in through an identity provider (OIDC).** The API verifies the access token on every request, either itself (for example with `@fastify/jwt` against the provider's JWKS) or in an API gateway in front of it.
+- **Ownership.** Add an `owner_id` to `birthdays`, set from the token on `POST /birthdays` and carried in the submission message. `GET /birthdays` and `GET /birthdays/:id` return only the caller's birthdays (`404`, not `403`, for someone else's id, so ids can't be probed). The reminder recipient then comes from the owner's account, which also fills the `reminderEmail` gap.
+- **Service credentials with least privilege.** Each service gets its own Postgres role (the API only needs `SELECT` on `birthdays`) and its own RabbitMQ user, limited to the queues it publishes to or consumes. Today both services share one account. Credentials come from a secret manager, not `.env`.
+- **Nothing internal reachable from outside.** Only the UI is public. The API's port, the Coordinator's actuator, Postgres and the RabbitMQ management UI stay on the private network (Compose publishes them all to the host for local development).
+
+### Dead-Letter Queue Handling
+
+**Today:** the Coordinator retries a failing submission 3 times in-process (waiting 1s, then 2s), then rejects it, and RabbitMQ moves it to `birthday.submissions.dlq`. Nothing reads that queue or alerts on it; it's inspected by hand in the management UI. `birthday.reminders` has no DLQ, since what to do with reminders the email service can't process is that team's decision.
+
+**Needed:**
+
+- **Retry long enough to ride out an outage.** The retries span about 3 seconds, so a database restart or failover dead-letters every submission that arrives while it lasts. Retry transient errors (database or connection failures) for minutes, using a delayed retry queue with a TTL that dead-letters back to `birthday.submissions`, and send only permanent failures (a message that can't be parsed or fails validation) to the DLQ straight away.
+- **Record why a message failed.** RabbitMQ's `x-death` header holds the queue, reason and count, but not the exception. Spring AMQP's `RepublishMessageRecoverer` publishes the failed message to the DLQ with the exception message and stack trace as headers.
+- **Alert on it.** Alert when the DLQ's depth goes above zero, with a runbook that says how to inspect, fix and replay.
+- **Replay tooling.** Once the cause is fixed, move messages back to `birthday.submissions` (a RabbitMQ shovel, or a small admin command). Replays are safe because the Coordinator inserts with `ON CONFLICT (id) DO NOTHING`.
+- **Retention.** Set a message TTL or length limit on the DLQ so a long-unnoticed failure can't fill the broker's disk.
+- **Agree a reminders policy with the email team,** including whether `birthday.reminders` gets its own DLQ. Adding one means recreating the queue, so it's cheaper to decide before launch.
+
+### Observability
+
+**Health checks today:** the API's `GET /health` always returns `{"status":"ok"}`. It says the process is running, but not whether it can reach Postgres or RabbitMQ. The Coordinator's `/actuator/health` includes database and broker checks, and its Kubernetes-style liveness and readiness probes are enabled.
+
+**Health checks needed:**
+
+- **Separate liveness from readiness in the API.** Keep `/health` as liveness (the process is up; failing it restarts the container), and add `/health/ready`, which checks Postgres (`SELECT 1`) and that the RabbitMQ connection is open. A load balancer stops sending traffic to an instance that isn't ready instead of restarting it.
+- **Point the orchestrator's probes at them:** `/health` and `/health/ready` for the API, and `/actuator/health/liveness` and `/actuator/health/readiness` for the Coordinator.
+
+**Metrics today:** none. The API exports no metrics, and the Coordinator's actuator exposes only `health` and `info`.
+
+**Metrics needed:**
+
+- **API:** request rate, latency and status code per route (for example `fastify-metrics`), plus a counter of failed publishes (the `503` responses).
+- **Coordinator:** add `micrometer-registry-prometheus` and expose the `prometheus` endpoint. Count submissions consumed, retried and dead-lettered. For the reminder job, record reminders published per run, run duration, and the time of the last successful run.
+- **RabbitMQ:** enable the `rabbitmq_prometheus` plugin for queue depth, consumer count and unacknowledged messages.
+- **Postgres:** connection pool usage and slow queries.
+
+**Alerts:**
+
+- the DLQ's depth is above zero
+- `birthday.submissions` is backing up, or has no consumers
+- the reminder job hasn't succeeded in the last 25 hours
+- the API's `5xx` or `503` rate goes up, or a service isn't ready
+
+**Logs and tracing:**
+
+- **Structured logs everywhere.** The API already logs JSON (Fastify's pino logger), and each submission's log lines include its id. The Coordinator still logs plain text; Spring Boot's structured logging (`logging.structured.format.console`) switches it to JSON.
+- **Tracing.** Use OpenTelemetry in both services and propagate the trace context in AMQP message headers, so one submission can be followed from the UI through the API, the queue and the Coordinator to Postgres.
+
+### Rate Limiting
+
+**Today:** none. `POST /birthdays` is unauthenticated, and every accepted request becomes a queue message and a database row, so one client can flood both. `GET /birthdays` isn't paginated, so every call reads the whole table.
+
+**Needed:**
+
+- **A coarse per-IP limit at the edge,** with nginx `limit_req` (or the API gateway or load balancer), so floods are dropped before they reach the API.
+- **Limits in the API** with `@fastify/rate-limit`, returning `429` with a `Retry-After` header: a tight limit on `POST /birthdays` and a looser one on reads. Once authentication exists, limit per user rather than per IP. With more than one API instance, keep the counters in a shared store such as Redis so the limit applies across instances.
+- **Trust the proxy.** The API runs behind nginx, so without Fastify's `trustProxy` option every request appears to come from nginx's address, and a per-IP limit would throttle everyone together. Trust only the proxy's address, so clients can't spoof `X-Forwarded-For`.
+- **A smaller request body limit.** Fastify accepts bodies up to 1 MiB by default; a submission is under 1 KiB, so a few KiB is plenty.
+- **Pagination on `GET /birthdays`** (cursor-based, on `created_at` and `id`). The response is already wrapped in an object so paging fields can be added without breaking clients.
+
+### Data Model and Reminders
+
+- **Schema migrations.** The `db/init` scripts only run when the Postgres volume is first created. That's fine for a local stack. Production schema changes should go through a migration tool such as Flyway, owned by one service.
+- **A transactional outbox for reminders.** Publishing a reminder and committing its `reminders_sent` row aren't atomic. If RabbitMQ confirms a reminder but the commit then fails, the next run sends it again (consumers dedupe on `reminderId`). Adding a `status` column to `reminders_sent` would turn it into a transactional outbox: commit the row as `pending`, then publish pending rows separately and mark them `published`.
+- **Pruning `reminders_sent`.** It grows by one row per birthday per year. Prune rows older than a year if the audit trail isn't needed.
