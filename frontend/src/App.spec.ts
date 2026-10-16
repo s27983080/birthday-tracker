@@ -3,11 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createMemoryHistory } from 'vue-router';
 import App from './App.vue';
 import { createAppRouter } from './router';
+import { createAppVuetify } from './vuetify';
 
 async function mountAt(path: string) {
   const router = createAppRouter(createMemoryHistory());
   await router.push(path);
-  const wrapper = mount(App, { global: { plugins: [router] } });
+  const wrapper = mount(App, { global: { plugins: [router, createAppVuetify()] } });
   await flushPromises();
   return { wrapper, router };
 }
@@ -67,7 +68,8 @@ describe('App', () => {
     expect(router.currentRoute.value.path).toBe('/submit');
 
     await wrapper.get('a.back-link').trigger('click');
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe('/');
+    // The form's v-select menu adds a router guard that lets navigation continue after a setTimeout,
+    // so flushing promises isn't enough to see the new route.
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/'));
   });
 });

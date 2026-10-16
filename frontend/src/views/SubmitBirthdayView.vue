@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { mdiArrowLeft } from '@mdi/js';
 import { reactive, ref } from 'vue';
 import { ApiError, submitBirthday } from '../api/birthdays';
 import { formatReminderWindow } from '../format';
 
 const NAME_MAX_LENGTH = 200;
-const REMINDER_WINDOW_OPTIONS = Array.from({ length: 14 }, (_, i) => i + 1);
+const REMINDER_WINDOW_ITEMS = Array.from({ length: 14 }, (_, i) => ({
+  title: formatReminderWindow(i + 1),
+  value: i + 1,
+}));
 const DEFAULT_REMINDER_WINDOW_DAYS = 7;
 
 /** Today in the user's local time zone, as YYYY-MM-DD for the date input's `max`. */
@@ -42,102 +46,91 @@ async function onSubmit() {
     submitting.value = false;
   }
 }
+
+/** A field's API error with its label in front ("Birthday must not be in the future"), for Vuetify's error slot. */
+function errorFor(field: string, label: string): string[] {
+  const message = fieldErrors.value[field];
+  return message ? [`${label} ${message}`] : [];
+}
 </script>
 
 <template>
-  <RouterLink :to="{ name: 'birthdays' }" class="back-link">← Back to birthdays</RouterLink>
+  <v-btn :to="{ name: 'birthdays' }" class="back-link" variant="text" :prepend-icon="mdiArrowLeft">
+    Back to birthdays
+  </v-btn>
 
-  <form class="birthday-form" novalidate @submit.prevent="onSubmit">
-    <h2>Add a birthday</h2>
+  <v-card class="birthday-form-card" variant="flat" border>
+    <v-card-item>
+      <h2 class="text-h5">Add a birthday</h2>
+    </v-card-item>
 
-    <div class="field">
-      <label for="name">Name</label>
-      <input
-        id="name"
-        v-model="form.name"
-        name="name"
-        type="text"
-        autocomplete="off"
-        required
-        :maxlength="NAME_MAX_LENGTH"
-        :aria-invalid="Boolean(fieldErrors.name)"
-        aria-describedby="name-error"
-      />
-      <p v-if="fieldErrors.name" id="name-error" class="field-error">Name {{ fieldErrors.name }}</p>
-    </div>
+    <v-card-text>
+      <!-- Vuetify puts a field's error in an element with id "<field id>-messages". -->
+      <v-form class="birthday-form" @submit.prevent="onSubmit">
+        <v-text-field
+          id="name"
+          v-model="form.name"
+          name="name"
+          label="Name"
+          autocomplete="off"
+          :maxlength="NAME_MAX_LENGTH"
+          :error-messages="errorFor('name', 'Name')"
+          :aria-invalid="Boolean(fieldErrors.name)"
+          aria-describedby="name-messages"
+        />
 
-    <div class="field">
-      <label for="birthDate">Birthday</label>
-      <input
-        id="birthDate"
-        v-model="form.birthDate"
-        name="birthDate"
-        type="date"
-        required
-        :max="localToday()"
-        :aria-invalid="Boolean(fieldErrors.birthDate)"
-        aria-describedby="birthDate-error"
-      />
-      <p v-if="fieldErrors.birthDate" id="birthDate-error" class="field-error">
-        Birthday {{ fieldErrors.birthDate }}
-      </p>
-    </div>
+        <v-text-field
+          id="birthDate"
+          v-model="form.birthDate"
+          name="birthDate"
+          type="date"
+          label="Birthday"
+          persistent-placeholder
+          :max="localToday()"
+          :error-messages="errorFor('birthDate', 'Birthday')"
+          :aria-invalid="Boolean(fieldErrors.birthDate)"
+          aria-describedby="birthDate-messages"
+        />
 
-    <div class="field">
-      <label for="reminderWindowDays">Remind me</label>
-      <select
-        id="reminderWindowDays"
-        v-model.number="form.reminderWindowDays"
-        name="reminderWindowDays"
-        required
-        :aria-invalid="Boolean(fieldErrors.reminderWindowDays)"
-        aria-describedby="reminderWindowDays-error"
-      >
-        <option v-for="days in REMINDER_WINDOW_OPTIONS" :key="days" :value="days">
-          {{ formatReminderWindow(days) }}
-        </option>
-      </select>
-      <p v-if="fieldErrors.reminderWindowDays" id="reminderWindowDays-error" class="field-error">
-        Reminder window {{ fieldErrors.reminderWindowDays }}
-      </p>
-    </div>
+        <v-select
+          id="reminderWindowDays"
+          v-model="form.reminderWindowDays"
+          name="reminderWindowDays"
+          label="Remind me"
+          :items="REMINDER_WINDOW_ITEMS"
+          :error-messages="errorFor('reminderWindowDays', 'Reminder window')"
+        />
 
-    <button type="submit" :disabled="submitting || !form.name.trim() || !form.birthDate">
-      {{ submitting ? 'Saving…' : 'Save birthday' }}
-    </button>
+        <v-btn
+          type="submit"
+          color="primary"
+          size="large"
+          block
+          :loading="submitting"
+          :disabled="submitting || !form.name.trim() || !form.birthDate"
+        >
+          {{ submitting ? 'Saving…' : 'Save birthday' }}
+        </v-btn>
 
-    <p v-if="successMessage" class="success" role="status">{{ successMessage }}</p>
-    <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
-  </form>
+        <v-alert v-if="successMessage" type="success" variant="tonal" role="status" :text="successMessage" />
+        <v-alert v-if="errorMessage" type="error" variant="tonal" :text="errorMessage" />
+      </v-form>
+    </v-card-text>
+  </v-card>
 </template>
 
 <style scoped>
 .back-link {
-  display: inline-block;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem -1rem;
+}
+
+.birthday-form-card {
+  max-width: 28rem;
 }
 
 .birthday-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-width: 24rem;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.field-error,
-.error {
-  color: #b00020;
-  margin: 0;
-}
-
-.success {
-  color: #1b5e20;
-  margin: 0;
+  gap: 0.5rem;
 }
 </style>

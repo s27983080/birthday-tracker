@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createMemoryHistory } from 'vue-router';
 import { createAppRouter } from '../router';
+import { createAppVuetify } from '../vuetify';
 import { formatBirthDate } from '../format';
 import BirthdayListView from './BirthdayListView.vue';
 
@@ -10,7 +11,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function mountView() {
-  return mount(BirthdayListView, { global: { plugins: [createAppRouter(createMemoryHistory())] } });
+  return mount(BirthdayListView, { global: { plugins: [createAppRouter(createMemoryHistory()), createAppVuetify()] } });
 }
 
 describe('BirthdayListView', () => {
