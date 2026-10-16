@@ -2,20 +2,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createMemoryHistory } from 'vue-router';
 import { createAppRouter } from '../router';
+import { createAppVuetify } from '../vuetify';
 import SubmitBirthdayView from './SubmitBirthdayView.vue';
 
 function mountView() {
-  return mount(SubmitBirthdayView, { global: { plugins: [createAppRouter(createMemoryHistory())] } });
+  return mount(SubmitBirthdayView, { global: { plugins: [createAppRouter(createMemoryHistory()), createAppVuetify()] } });
 }
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+/** The reminder window picker. It's a Vuetify select (its list opens in an overlay), not a native <select>. */
+function reminderSelect(wrapper: VueWrapper) {
+  return wrapper.findComponent({ name: 'VSelect' });
+}
+
 async function fillAndSubmit(wrapper: VueWrapper) {
   await wrapper.get('#name').setValue('  Ada Lovelace ');
   await wrapper.get('#birthDate').setValue('1815-12-10');
-  await wrapper.get('#reminderWindowDays').setValue('3');
+  await reminderSelect(wrapper).setValue(3);
   await wrapper.get('form').trigger('submit');
 }
 
@@ -39,10 +45,12 @@ describe('SubmitBirthdayView', () => {
 
   it('offers reminder windows from 1 to 14 days, defaulting to 7', () => {
     const wrapper = mountView();
-    const options = wrapper.findAll('#reminderWindowDays option').map((o) => Number(o.element.getAttribute('value')));
+    const items = reminderSelect(wrapper).props('items') as { title: string; value: number }[];
 
-    expect(options).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
-    expect((wrapper.get('#reminderWindowDays').element as HTMLSelectElement).value).toBe('7');
+    expect(items.map((item) => item.value)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    expect(items[0].title).toBe('1 day before');
+    expect(reminderSelect(wrapper).props('modelValue')).toBe(7);
+    expect(wrapper.get('.v-select__selection-text').text()).toBe('7 days before');
   });
 
   it('disables submit until name and birthday are filled in', async () => {
@@ -105,9 +113,9 @@ describe('SubmitBirthdayView', () => {
     await fillAndSubmit(wrapper);
     await flushPromises();
 
-    expect(wrapper.get('#birthDate-error').text()).toBe('Birthday must not be in the future');
+    expect(wrapper.get('#birthDate-messages').text()).toBe('Birthday must not be in the future');
     expect(wrapper.get('#birthDate').attributes('aria-invalid')).toBe('true');
-    expect(wrapper.get('[role="alert"]').text()).toBe('Please fix the highlighted fields.');
+    expect(wrapper.get('.v-alert[role="alert"]').text()).toBe('Please fix the highlighted fields.');
     expect((wrapper.get('#name').element as HTMLInputElement).value).toBe('  Ada Lovelace ');
   });
 
@@ -118,7 +126,7 @@ describe('SubmitBirthdayView', () => {
     await fillAndSubmit(wrapper);
     await flushPromises();
 
-    expect(wrapper.get('[role="alert"]').text()).toBe('Something went wrong saving the birthday. Please try again.');
+    expect(wrapper.get('.v-alert[role="alert"]').text()).toBe('Something went wrong saving the birthday. Please try again.');
     expect(wrapper.find('[role="status"]').exists()).toBe(false);
   });
 });

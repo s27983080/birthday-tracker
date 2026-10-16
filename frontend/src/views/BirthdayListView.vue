@@ -1,7 +1,18 @@
 <script setup lang="ts">
+import { mdiCakeVariantOutline, mdiPlus } from '@mdi/js';
 import { onMounted, ref } from 'vue';
 import { listBirthdays, type Birthday } from '../api/birthdays';
 import { formatBirthDate, formatReminderWindow } from '../format';
+
+const PAGE_SIZE = 10;
+
+// Unsorted until the user clicks a header, so the API's order (most recently added first) is the default.
+const headers = [
+  { title: 'Name', key: 'name' },
+  // birthDate is YYYY-MM-DD, so sorting the raw string sorts by date.
+  { title: 'Birthday', key: 'birthDate' },
+  { title: 'Reminder', key: 'reminderWindowDays' },
+];
 
 const birthdays = ref<Birthday[]>([]);
 const loading = ref(true);
@@ -21,33 +32,35 @@ onMounted(async () => {
 <template>
   <section class="birthday-list">
     <div class="header">
-      <h2>Birthdays</h2>
-      <RouterLink :to="{ name: 'submit' }" class="button">Add a birthday</RouterLink>
+      <h2 class="text-h5">Birthdays</h2>
+      <v-btn :to="{ name: 'submit' }" class="button" color="primary" :prepend-icon="mdiPlus">Add a birthday</v-btn>
     </div>
 
-    <p v-if="loading" role="status">Loading birthdays…</p>
-    <p v-else-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
-    <p v-else-if="birthdays.length === 0" class="empty">No birthdays yet.</p>
-    <table v-else>
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Birthday</th>
-          <th scope="col">Reminder</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="birthday in birthdays" :key="birthday.id">
-          <td>
-            <RouterLink :to="{ name: 'birthday', params: { id: birthday.id } }">{{ birthday.name }}</RouterLink>
-          </td>
-          <td>
-            <time :datetime="birthday.birthDate">{{ formatBirthDate(birthday.birthDate) }}</time>
-          </td>
-          <td>{{ formatReminderWindow(birthday.reminderWindowDays) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-if="loading" class="loading" role="status">
+      <v-progress-circular indeterminate size="20" width="2" />
+      Loading birthdays…
+    </div>
+    <v-alert v-else-if="errorMessage" type="error" variant="tonal" :text="errorMessage" />
+    <v-empty-state v-else-if="birthdays.length === 0" class="empty" :icon="mdiCakeVariantOutline" text="No birthdays yet." />
+    <v-card v-else variant="flat" border>
+      <v-data-table
+        :headers="headers"
+        :items="birthdays"
+        item-value="id"
+        :items-per-page="PAGE_SIZE"
+        :hide-default-footer="birthdays.length <= PAGE_SIZE"
+      >
+        <template #item.name="{ item }">
+          <RouterLink :to="{ name: 'birthday', params: { id: item.id } }" class="name-link">{{ item.name }}</RouterLink>
+        </template>
+        <template #item.birthDate="{ item }">
+          <time :datetime="item.birthDate">{{ formatBirthDate(item.birthDate) }}</time>
+        </template>
+        <template #item.reminderWindowDays="{ item }">
+          {{ formatReminderWindow(item.reminderWindowDays) }}
+        </template>
+      </v-data-table>
+    </v-card>
   </section>
 </template>
 
@@ -55,8 +68,7 @@ onMounted(async () => {
 .birthday-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-width: 40rem;
+  gap: 1.5rem;
 }
 
 .header {
@@ -66,35 +78,20 @@ onMounted(async () => {
   gap: 1rem;
 }
 
-.header h2 {
-  margin: 0;
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-.button {
-  padding: 0.4rem 0.9rem;
-  border: 1px solid currentColor;
-  border-radius: 4px;
+.name-link {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 500;
   text-decoration: none;
 }
 
-table {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-th,
-td {
-  padding: 0.5rem;
-  border-bottom: 1px solid #ddd;
-  text-align: left;
-}
-
-.error {
-  color: #b00020;
-  margin: 0;
-}
-
-.empty {
-  margin: 0;
+.name-link:hover,
+.name-link:focus-visible {
+  text-decoration: underline;
 }
 </style>

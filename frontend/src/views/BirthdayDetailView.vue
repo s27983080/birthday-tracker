@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { mdiArrowLeft, mdiCakeVariant } from '@mdi/js';
 import { ref, watch } from 'vue';
 import { ApiError, getBirthday, type Birthday } from '../api/birthdays';
 import { formatBirthDate, formatReminderWindow } from '../format';
@@ -38,51 +39,66 @@ watch(() => props.id, load, { immediate: true });
 </script>
 
 <template>
-  <RouterLink :to="{ name: 'birthdays' }" class="back-link">← Back to birthdays</RouterLink>
+  <v-btn :to="{ name: 'birthdays' }" class="back-link" variant="text" :prepend-icon="mdiArrowLeft">
+    Back to birthdays
+  </v-btn>
 
-  <p v-if="loading" role="status">Loading birthday…</p>
-  <p v-else-if="notFound" class="not-found">We couldn't find that birthday.</p>
-  <p v-else-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
-  <article v-else-if="birthday" class="birthday">
-    <h2>{{ birthday.name }}</h2>
-    <dl>
-      <dt>Birthday</dt>
-      <dd>
-        <time :datetime="birthday.birthDate">{{ formatBirthDate(birthday.birthDate) }}</time>
-      </dd>
-      <dt>Reminder</dt>
-      <dd>{{ formatReminderWindow(birthday.reminderWindowDays) }}</dd>
-    </dl>
-  </article>
+  <div v-if="loading" class="loading" role="status">
+    <v-progress-circular indeterminate size="20" width="2" />
+    Loading birthday…
+  </div>
+  <v-alert v-else-if="notFound" class="not-found" type="info" variant="tonal" text="We couldn't find that birthday." />
+  <v-alert v-else-if="errorMessage" type="error" variant="tonal" :text="errorMessage" />
+  <v-card v-else-if="birthday" class="birthday" variant="flat" border>
+    <v-card-item>
+      <template #prepend>
+        <v-avatar color="primary" variant="tonal">
+          <v-icon :icon="mdiCakeVariant" />
+        </v-avatar>
+      </template>
+      <h2 class="text-h5">{{ birthday.name }}</h2>
+    </v-card-item>
+    <v-card-text>
+      <dl>
+        <dt>Birthday</dt>
+        <dd>
+          <time :datetime="birthday.birthDate">{{ formatBirthDate(birthday.birthDate) }}</time>
+        </dd>
+        <dt>Reminder</dt>
+        <dd>{{ formatReminderWindow(birthday.reminderWindowDays) }}</dd>
+      </dl>
+    </v-card-text>
+  </v-card>
 </template>
 
 <style scoped>
 .back-link {
-  display: inline-block;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem -1rem;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.birthday {
+  max-width: 32rem;
 }
 
 dl {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.5rem 1.5rem;
+  gap: 0.75rem 2rem;
   margin: 0;
+  font-size: 1rem;
 }
 
 dt {
-  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
 }
 
 dd {
-  margin: 0;
-}
-
-.error {
-  color: #b00020;
-  margin: 0;
-}
-
-.not-found {
   margin: 0;
 }
 </style>

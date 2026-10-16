@@ -44,7 +44,7 @@ All three services' tests also run during their Docker image builds, so a failin
 
 | Path           | Contents                                                                         |
 | -------------- | -------------------------------------------------------------------------------- |
-| `frontend/`    | Vue + TypeScript (Vite) UI, served by nginx, which also proxies `/api` to the API |
+| `frontend/`    | Vue + TypeScript (Vite) UI built with Vuetify, served by nginx, which also proxies `/api` to the API |
 | `api/`         | Fastify + TypeScript Backend API                                                 |
 | `coordinator/` | Spring Boot (Java 21) Backend Coordinator                                        |
 | `db/init/`     | SQL run by Postgres on first start; defines the `birthdays` table                |
@@ -56,7 +56,7 @@ All three services' tests also run during their Docker image builds, so a failin
 
 | Layer                           | Technology                     | Responsibility                                                                                                                                                                                     |
 | ------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend (UI Application)       | Vue + TypeScript               | Lets users in the browser submit birthdays (with a 1–14 day reminder window) and view a list of birthdays or a single birthday. Talks to the Backend API over HTTP/JSON.                           |
+| Frontend (UI Application)       | Vue + TypeScript + Vuetify     | Lets users in the browser submit birthdays (with a 1–14 day reminder window) and view a list of birthdays or a single birthday. Talks to the Backend API over HTTP/JSON.                           |
 | Backend API Application         | Fastify + TypeScript (Node.js) | Validates birthday submissions and publishes them to the message queue. Serves REST endpoints that read the birthday list and individual birthdays from the database.                              |
 | Backend Coordinator Application | Spring Boot (Java)             | Consumes birthday submission messages and writes them to the database. Runs a daily job that checks birthdays against their reminder windows and publishes reminder messages to the message queue. |
 | Database                        | PostgreSQL                     | Shared data store for both backend services.                                                                                                                                                       |
@@ -69,7 +69,7 @@ flowchart LR
     user(["User (browser)"])
 
     subgraph frontend["Frontend"]
-        ui["UI Application<br/>Vue + TypeScript"]
+        ui["UI Application<br/>Vue + TypeScript + Vuetify"]
     end
 
     subgraph api_layer["Backend API"]
@@ -126,6 +126,18 @@ flowchart LR
 **Reasoning:** Durable queues, persistent messages, acknowledgements, and redelivery support reliable asynchronous processing when configured appropriately. This allows the API and coordinator to operate independently.
 
 **Trade-offs:** Message delivery can be repeated, so consumers must handle duplicate messages safely. Broker persistence and application-level failure handling also need to be configured.
+
+#### UI Components: Vuetify
+
+**Choice:** Vuetify, with Material Design Icons as SVG paths (`@mdi/js`).
+
+**Reasoning:** It covers everything the UI needs (data table with sorting and paging, form fields with error messages, alerts, cards) without adding Tailwind, follows the system's light or dark setting, and is MIT-licensed and actively maintained. `vite-plugin-vuetify` imports only the components a template uses, and icons are imported one by one, so unused ones aren't bundled. PrimeVue was the first choice, but from version 5 it's under a commercial licence that needs a licence key, and the MIT-licensed 4.x line is no longer updated.
+
+**Trade-offs:**
+
+- **The look is Material Design.** It can be themed (the pink accent is set in `frontend/src/vuetify.ts`), but moving far from Material is work.
+- **The birthday field is a native date input inside a Vuetify text field, not Vuetify's date picker.** The date picker produces a JavaScript `Date`, which is easy to shift by a day when converting between time zones; the native input gives the `YYYY-MM-DD` string the API expects.
+- **Tests drive some components through Vuetify.** The reminder window is a Vuetify select, whose list opens in an overlay, so its spec sets the value on the component rather than on a native `<select>`. jsdom lacks `ResizeObserver`, so `frontend/src/test-setup.ts` stubs it.
 
 ## Submitting a Birthday
 
